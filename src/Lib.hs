@@ -84,8 +84,8 @@ updateMessages = do
       messages = catMaybes $ case body of
         (Just x) -> x & result & mapped %~ parseResult . return
         Nothing  -> return Nothing
-  liftIO $ putStrLn $ "Polled: " ++ show messages
-  liftIO $ putStrLn $ "State: " ++ show state
+{-   liftIO $ putStrLn $ "Polled: " ++ show messages
+  liftIO $ putStrLn $ "State: " ++ show state -}
   case length messages of
     0 -> return []
     _ -> do
@@ -98,9 +98,10 @@ sendMessage chatId text replyId = do
   let obj = object ["chat_id" .= chatId, "text" .= text, "reply_to_message_id" .= replyId]
   response <- liftIO $ httpLbs (sendMessageRequest {method = "POST", requestBody = RequestBodyLBS $ encode obj, requestHeaders = [("Content-Type", "application/json")]}) manager
   let body = decode $ response & responseBody :: Maybe (MyResponse Value)
-  case body of
+{-   case body of
     Just (MyResponse status _) -> liftIO $ print status
-    _                          -> return ()
+    _                          -> return () -}
+  return ()
 
 runBot :: MonadIO m => Manager -> UpdateState -> Bot m a -> m a
 runBot r s bot = runReaderT (evalStateT bot s) r
@@ -121,6 +122,12 @@ replace ('_' : xs) = '-' : replace xs
 replace (x : xs)   = x : replace xs
 replace ""         = ""
 
+replace' ('n':'-' : xs) = 'n' : '_' : replace' xs
+replace' ('s':'-' : xs) = 's' : '_' : replace' xs
+replace' ('@' : xs) = replace' xs
+replace' (x : xs)   = x : replace' xs
+replace' ""         = ""
+
 messageHandler :: MonadIO m => Message -> Bot m ()
 messageHandler Message {..} = do
   let z = runP (try parseHelp <|> parseCmd) () "xxx" _text
@@ -131,7 +138,7 @@ messageHandler Message {..} = do
       x -> do
         let builded = buildCmd $ '@' : (replace x) ++ " " ++ arg
         (result, _) <- liftIO $ runLambda builded
-        sendMessage _chatId (T.pack result) _messageId
+        sendMessage _chatId (T.pack $ replace' result) _messageId
 
 
 runApplication :: IO ()
@@ -163,9 +170,6 @@ lambdaModules =
         Command "djinn" $ T.unlines ["djinn <type>.", "Generates Haskell code from a type.", "http://darcs.augustsson.net/Darcs/Djinn"]
       ],
     Module
-      "check"
-      [Command "check" "You have QuickCheck and 3 seconds. Prove something."],
-    Module
       "pl"
       [ Command "pl" "pl <expr>. Play with pointfree code.",
         Command "unpl" "unpl <expr>. Make code pointier."
@@ -193,10 +197,7 @@ lambdaModules =
       ],
     Module
       "hoogle"
-      [Command "hoogle" "hoogle <expr>. Haskell API Search for either names, or types."],
-    Module
-      "src"
-      [Command "src" "src <id>. Display the implementation of a standard function"]
+      [Command "hoogle" "hoogle <expr>. Haskell API Search for either names, or types."]
   ]
 
 allCommands = (lambdaModules <&> _cmdList) ^. each
