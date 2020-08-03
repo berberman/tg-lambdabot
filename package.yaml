@@ -36,6 +36,13 @@ dependencies:
 - aeson
 - microlens
 - transformers
+# https://github.com/gwern/mueval/issues/16
+- mueval
+- simple-reflect
+- QuickCheck
+- pretty
+- containers
+- bytestring
 
 library:
   source-dirs: src

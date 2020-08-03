@@ -1,4 +1,3 @@
-
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
@@ -18,6 +17,7 @@ import           Data.Maybe
 import qualified Data.Scientific          as Scientific
 import           Data.Text                (Text)
 import qualified Data.Text                as T
+import           Eval
 import           GHC.Generics             (Generic)
 import           Lambdabot.Main
 import           Lambdabot.Plugin.Haskell
@@ -29,6 +29,7 @@ import           System.IO.Silently       (capture)
 import           Text.Parsec
 import           Text.Parsec.Char
 import           Text.Parsec.Text
+
 
 loadedModules = $(modules $ corePlugins ++ haskellPlugins)
 
@@ -124,9 +125,9 @@ replace ""         = ""
 
 replace' ('n':'-' : xs) = 'n' : '_' : replace' xs
 replace' ('s':'-' : xs) = 's' : '_' : replace' xs
-replace' ('@' : xs) = replace' xs
-replace' (x : xs)   = x : replace' xs
-replace' ""         = ""
+replace' ('@' : xs)     = replace' xs
+replace' (x : xs)       = x : replace' xs
+replace' ""             = ""
 
 messageHandler :: MonadIO m => Message -> Bot m ()
 messageHandler Message {..} = do
@@ -135,6 +136,7 @@ messageHandler Message {..} = do
     Left e -> {- sendMessage _chatId (T.pack $ show e) _messageId -} return ()
     Right (cmd, arg) -> case cmd of
       "help" -> sendMessage _chatId helpMessage _messageId
+      "eval" -> (liftIO $ mueval arg) >>= \r -> sendMessage _chatId (T.pack r) _messageId
       x -> do
         let builded = buildCmd $ '@' : (replace x) ++ " " ++ arg
         (result, _) <- liftIO $ runLambda builded
@@ -197,7 +199,10 @@ lambdaModules =
       ],
     Module
       "hoogle"
-      [Command "hoogle" "hoogle <expr>. Haskell API Search for either names, or types."]
+      [Command "hoogle" "hoogle <expr>. Haskell API Search for either names, or types."],
+    Module
+      "eval"
+      [Command "eval" "eval <expr>. Run haskell expression."]
   ]
 
 allCommands = (lambdaModules <&> _cmdList) ^. each

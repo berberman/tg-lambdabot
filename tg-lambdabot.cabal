@@ -25,14 +25,18 @@ source-repository head
 library
   exposed-modules:
       API
+      Eval
       Lib
   other-modules:
       Paths_tg_lambdabot
   hs-source-dirs:
       src
   build-depends:
-      aeson
+      QuickCheck
+    , aeson
     , base >=4.7 && <5
+    , bytestring
+    , containers
     , http-client
     , http-client-tls
     , http-types
@@ -42,9 +46,12 @@ library
     , lambdabot-trusted
     , microlens
     , mtl
+    , mueval
     , parsec
+    , pretty
     , scientific
     , silently
+    , simple-reflect
     , text
     , transformers
     , unordered-containers
@@ -58,8 +65,11 @@ executable tg-lambdabot-exe
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      aeson
+      QuickCheck
+    , aeson
     , base >=4.7 && <5
+    , bytestring
+    , containers
     , http-client
     , http-client-tls
     , http-types
@@ -69,9 +79,12 @@ executable tg-lambdabot-exe
     , lambdabot-trusted
     , microlens
     , mtl
+    , mueval
     , parsec
+    , pretty
     , scientific
     , silently
+    , simple-reflect
     , text
     , tg-lambdabot
     , transformers
