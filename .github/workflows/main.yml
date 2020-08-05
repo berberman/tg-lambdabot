@@ -18,6 +18,8 @@ jobs:
         # use this to specify what resolvers and ghc to use
         plan:
         - { build: stack, resolver: "--resolver lts-3.22"  }
+        - { build: stack, resolver: "--resolver lts-3.5"  }
+        - { build: stack, resolver: "--resolver lts-3.8"  }
         # use this to include any dependencies from OS package managers
         include: []
 
