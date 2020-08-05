@@ -1,0 +1,45 @@
+name:                tg-echobot
+version:             0.1.0.0
+github:              "berberman/tg-echobot"
+license:             BSD3
+author:              "berberman"
+maintainer:          "example@example.com"
+copyright:           "2020 berberman"
+
+extra-source-files:
+- README.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/berberman/tg-echobot#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- scientific
+- aeson
+- unordered-containers
+- text
+- req
+- polysemy
+- microlens
+
+library:
+  source-dirs: src
+  ghc-options: -O2 -flate-specialise -fspecialise-aggressively
+
+
+executables:
+  tg-echobot-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - tg-echobot

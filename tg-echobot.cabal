@@ -1,0 +1,64 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.33.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: a246b6c8833dda63d40aebc550b544b84f5a18179fc394424b5818e423dfb446
+
+name:           tg-echobot
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/berberman/tg-echobot#readme>
+homepage:       https://github.com/berberman/tg-echobot#readme
+bug-reports:    https://github.com/berberman/tg-echobot/issues
+author:         berberman
+maintainer:     example@example.com
+copyright:      2020 berberman
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+
+source-repository head
+  type: git
+  location: https://github.com/berberman/tg-echobot
+
+library
+  exposed-modules:
+      API
+      Lib
+  other-modules:
+      Paths_tg_echobot
+  hs-source-dirs:
+      src
+  ghc-options: -O2 -flate-specialise -fspecialise-aggressively
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , microlens
+    , polysemy
+    , req
+    , scientific
+    , text
+    , unordered-containers
+  default-language: Haskell2010
+
+executable tg-echobot-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_tg_echobot
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , microlens
+    , polysemy
+    , req
+    , scientific
+    , text
+    , tg-echobot
+    , unordered-containers
+  default-language: Haskell2010
