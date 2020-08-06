@@ -4,7 +4,7 @@ module API where
 
 import Network.HTTP.Req
 
-baseAPI = https "api.telegram.org" /: "bot<token>"
+baseAPI = https "api.telegram.org" /: "bot<>"
 
 getUpdatesAPI = baseAPI /: "getUpdates"
 

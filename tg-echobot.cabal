@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.2.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: a246b6c8833dda63d40aebc550b544b84f5a18179fc394424b5818e423dfb446
+-- hash: 844375918c31a37728322d080e38644c6ae5be22d7d6cd217106b3e8f8169472
 
 name:           tg-echobot
 version:        0.1.0.0
@@ -27,6 +27,8 @@ source-repository head
 library
   exposed-modules:
       API
+      Commands
+      Eval
       Lib
   other-modules:
       Paths_tg_echobot
@@ -34,10 +36,13 @@ library
       src
   ghc-options: -O2 -flate-specialise -fspecialise-aggressively
   build-depends:
-      aeson
+      MissingH
+    , aeson
     , base >=4.7 && <5
+    , megaparsec
     , microlens
     , polysemy
+    , process
     , req
     , scientific
     , text
@@ -52,10 +57,13 @@ executable tg-echobot-exe
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      aeson
+      MissingH
+    , aeson
     , base >=4.7 && <5
+    , megaparsec
     , microlens
     , polysemy
+    , process
     , req
     , scientific
     , text

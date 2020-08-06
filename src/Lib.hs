@@ -17,12 +17,16 @@
 module Lib where
 
 import API
+import Commands
 import Data.Aeson
 import qualified Data.HashMap.Strict as H
 import Data.Maybe (catMaybes)
 import qualified Data.Scientific as Scientific
+import qualified Data.String.Utils as S
 import Data.Text (Text)
 import qualified Data.Text as T
+import Eval
+import Debug.Trace
 import GHC.Generics (Generic)
 import Lens.Micro
 import Network.HTTP.Req
@@ -30,6 +34,7 @@ import Polysemy
 import Polysemy.Async
 import Polysemy.Internal (send)
 import Polysemy.State
+import qualified Text.Megaparsec as M
 
 data Message = Message
   { _updateId :: Integer,
@@ -51,20 +56,26 @@ type ChatID = Integer
 
 type ReplyId = Integer
 
+type Expr = String
+
+type Cmd = String
+
 newtype UpdateState = UpdateState Integer deriving (Eq, Show)
 
 data TgBot m a where
   Poll :: UpdateState -> TgBot m [Message]
   Reply :: (ChatID, Text, ReplyId) -> TgBot m Bool
 
-makeSem ''TgBot
+data Eval m a where
+  CallLambda :: Cmd -> Expr -> Eval m String
+  CallEval :: Expr -> Eval m String
 
-initialState :: Member (State UpdateState) r => Sem r ()
-initialState = put $ UpdateState 233
+makeSem ''TgBot
+makeSem ''Eval
 
 updateState :: Member (State UpdateState) r => [Message] -> Sem r ()
 updateState [] = return ()
-updateState messages = put $ UpdateState . (+ 2) $ maximum $ messages <&> _updateId
+updateState messages = put $ UpdateState . (+ 1) $ maximum $ messages <&> _updateId
 
 reqToIO :: forall a r. Member (Embed IO) r => Req a -> Sem r a
 reqToIO req = embed (runReq defaultHttpConfig req :: IO a)
@@ -102,7 +113,12 @@ tgBotToIO = interpret $ \case
     response <- reqToIO request
     return $ response & ok . responseBody
 
-program :: Members '[TgBot, State UpdateState, Async] r => Sem r ()
+evalToIO :: Member (Embed IO) r => Sem (Eval ': r) a -> Sem r a
+evalToIO = interpret $ \case
+  CallLambda cmd expr -> embed . runCommand $ '@' : (S.replace "_" "-" cmd) ++ " " ++ expr
+  CallEval expr -> embed $ runEval expr
+
+program :: Members '[TgBot, State UpdateState, Async, Eval] r => Sem r ()
 program = do
   state <- get
   messages <- poll state
@@ -111,9 +127,24 @@ program = do
   program
 
 runApplication :: IO ()
-runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . tgBotToIO . evalState (UpdateState 233) $ program
+runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . evalToIO . tgBotToIO . evalState (UpdateState 233) $ program
 
-messageHandler :: Member TgBot r => Message -> Sem r ()
+logResult :: Member TgBot r => Sem r Bool -> Sem r ()
+logResult r = r >> return ()
+
+messageHandler :: Members '[TgBot, Eval] r => Message -> Sem r ()
 messageHandler Message {..} = do
-  reply (_chatId, _text, _messageId)
+  let z = M.parse (M.try parseHelp M.<|> parseCmd) "Command" (T.unpack _text)
+  case (traceShow z z) of
+    Left e -> return ()
+    Right (cmd, arg) -> case cmd of
+      "help" -> logResult $ reply (_chatId, T.pack helpMessage, _messageId)
+      "eval" -> do
+        result <- callEval arg
+        let r = if result == [] then "Empty Body QAQ" else result
+        logResult $ reply (_chatId, T.pack . replace' $ r, _messageId)
+      _ -> do
+        result <- callLambda cmd arg
+        let r = if result == [] then "Empty Body QAQ" else result
+        logResult $ reply (_chatId, T.pack . replace' $ r, _messageId)
   return ()

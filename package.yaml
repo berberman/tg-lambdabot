@@ -27,6 +27,9 @@ dependencies:
 - req
 - polysemy
 - microlens
+- process
+- megaparsec
+- MissingH
 
 library:
   source-dirs: src
