@@ -8,8 +8,8 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -25,8 +25,8 @@ import qualified Data.Scientific as Scientific
 import qualified Data.String.Utils as S
 import Data.Text (Text)
 import qualified Data.Text as T
-import Eval
 import Debug.Trace
+import Eval
 import GHC.Generics (Generic)
 import Lens.Micro
 import Network.HTTP.Req
@@ -40,6 +40,7 @@ data Message = Message
   { _updateId :: Integer,
     _messageId :: Integer,
     _chatId :: Integer,
+    _isPM :: Bool,
     _text :: Text
   }
   deriving (Show, Eq)
@@ -88,7 +89,7 @@ tgBotToIO = interpret $ \case
     return . parseMessages $ responseBody response
     where
       parseMessages :: MyResponse [Value] -> [Message]
-      parseMessages (MyResponse _ a) = messages
+      parseMessages (MyResponse _ a) = catMaybes $ a <&> parseSingle
         where
           lookupInt k obj = do
             m <- H.lookup k obj
@@ -103,9 +104,9 @@ tgBotToIO = interpret $ \case
             updateId <- lookupInt "update_id" update
             messageId <- lookupInt "message_id" message
             chatId <- lookupInt "id" chat
+            chatType <- H.lookup "type" chat
             let (String text) = H.lookupDefault "" "text" message
-            return $ Message updateId messageId chatId text
-          messages = catMaybes $ a <&> parseSingle
+            return $ Message updateId messageId chatId (chatType == "private") text
   Reply (chatId, text, replyId) -> do
     let obj = object ["chat_id" .= chatId, "text" .= text, "reply_to_message_id" .= replyId]
         request :: Req (JsonResponse (MyResponse Value))
@@ -134,9 +135,12 @@ logResult r = r >> return ()
 
 messageHandler :: Members '[TgBot, Eval] r => Message -> Sem r ()
 messageHandler Message {..} = do
-  let z = M.parse (M.try parseHelp M.<|> parseCmd) "Command" (T.unpack _text)
+  let z = M.parse (M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
   case (traceShow z z) of
-    Left e -> return ()
+    Left e ->
+      if _isPM
+        then logResult $ reply (_chatId, T.pack . M.errorBundlePretty $ e, _messageId)
+        else return ()
     Right (cmd, arg) -> case cmd of
       "help" -> logResult $ reply (_chatId, T.pack helpMessage, _messageId)
       "eval" -> do

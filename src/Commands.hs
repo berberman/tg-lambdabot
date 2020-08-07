@@ -4,10 +4,10 @@ module Commands where
 
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Void
 import Lens.Micro
 import Text.Megaparsec
 import Text.Megaparsec.Char
-import Data.Void
 
 type Parser = Parsec Void String
 
@@ -30,7 +30,7 @@ lambdaModules =
         Command "djinn_env" $ unlines ["djinn_env.", "Show the current djinn environment"],
         Command "djinn_names" $ unlines ["djinn_names.", "Show the current djinn environment, compactly."],
         Command "djinn_clr" $ unlines ["djinn_clr.", "Reset the djinn environment"],
-        Command "djinn" $ unlines ["djinn <type>.", "Generates Haskell code from a type.", "http://darcs.augustsson.net/Darcs/Djinn"]
+        Command "djinn" $ unlines ["djinn <type>.", "Generates Haskell code from a type."]
       ],
     Module
       "pl"
@@ -77,14 +77,13 @@ parseHelp = do
 
 parseCmd :: Parser (String, String)
 parseCmd = do
-  ('/':cmd) <- choice $ allCommands <&> try  .string . ('/' :) . _cmd
+  ('/' : cmd) <- choice $ allCommands <&> try . string . ('/' :) . _cmd
   space <- (try $ char (' ') *> return ()) <|> eof
   rest <- manyTill anySingle eof
   return (cmd, rest)
 
-replace' ('n':'-' : xs) = 'n' : '_' : replace' xs
-replace' ('s':'-' : xs) = 's' : '_' : replace' xs
-replace' ('@' : xs)     = replace' xs
-replace' (x : xs)       = x : replace' xs
-replace' ""             = ""
-
+replace' ('n' : '-' : xs) = 'n' : '_' : replace' xs
+replace' ('s' : '-' : xs) = 's' : '_' : replace' xs
+replace' ('@' : xs) = replace' xs
+replace' (x : xs) = x : replace' xs
+replace' "" = ""
