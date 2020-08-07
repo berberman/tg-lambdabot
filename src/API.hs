@@ -9,3 +9,5 @@ baseAPI = https "api.telegram.org" /: "bot<>"
 getUpdatesAPI = baseAPI /: "getUpdates"
 
 sendMessageAPI = baseAPI /: "sendMessage"
+
+answerInlineQueryAPI = baseAPI /: "answerInlineQuery"
