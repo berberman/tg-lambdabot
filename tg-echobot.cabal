@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 844375918c31a37728322d080e38644c6ae5be22d7d6cd217106b3e8f8169472
+-- hash: 1ec4e71f6df1b1ddf78939e2d7afcdd285c474c0979bd612e5378a540b3f440d
 
 name:           tg-echobot
 version:        0.1.0.0
@@ -44,6 +44,7 @@ library
     , polysemy
     , process
     , req
+    , retry
     , scientific
     , text
     , unordered-containers
@@ -65,6 +66,7 @@ executable tg-echobot-exe
     , polysemy
     , process
     , req
+    , retry
     , scientific
     , text
     , tg-echobot

@@ -30,6 +30,7 @@ dependencies:
 - process
 - megaparsec
 - MissingH
+- retry
 
 library:
   source-dirs: src

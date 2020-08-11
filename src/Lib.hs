@@ -18,6 +18,7 @@ module Lib where
 
 import API
 import Commands
+import Control.Retry
 import Data.Aeson
 import qualified Data.HashMap.Strict as H
 import Data.Maybe (catMaybes)
@@ -30,7 +31,6 @@ import Eval
 import GHC.Generics (Generic)
 import Lens.Micro
 import Network.HTTP.Req
-import Control.Exception
 import Polysemy
 import Polysemy.Async
 import Polysemy.Internal (send)
@@ -80,7 +80,7 @@ updateState [] = return ()
 updateState messages = put $ UpdateState . (+ 1) $ maximum $ messages <&> _updateId
 
 reqToIO :: forall a r. Member (Embed IO) r => Req a -> Sem r a
-reqToIO req = embed (catch @HttpException (runReq defaultHttpConfig req) (\e -> print e >> (runReq defaultHttpConfig req)) :: IO a)
+reqToIO req = embed @IO $ runReq defaultHttpConfig {httpConfigRetryPolicy = constantDelay 50000 <> limitRetries 233} req
 
 tgBotToIO :: Member (Embed IO) r => Sem (TgBot ': r) a -> Sem r a
 tgBotToIO = interpret $ \case
