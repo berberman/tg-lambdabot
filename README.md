@@ -1,1 +1,3 @@
-# bott
+# tg-lambdabot
+
+Glue code.

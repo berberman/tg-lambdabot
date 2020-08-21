@@ -70,10 +70,14 @@ allCommands = (lambdaModules <&> _cmdList) ^. each
 
 helpMessage = unlines $ allCommands & mapped %~ (\c -> ((<> ": ") . ("/" <>) $ (c & _cmd)) <> "   " <> (c & _help))
 
-parseHelp :: Parser (String, String)
-parseHelp = do
-  string "/help"
-  return ("help", "")
+parseRaw :: String -> Parser (String, String)
+parseRaw s = do
+  (_ : xs) <- string s
+  return (xs, "")
+
+parseHelp = parseRaw "/help"
+
+parseStart = parseRaw "/start"
 
 parseCmd :: Parser (String, String)
 parseCmd = do

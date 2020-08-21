@@ -18,7 +18,6 @@ module Lib where
 
 import API
 import Commands
-import Control.Retry
 import Data.Aeson
 import qualified Data.HashMap.Strict as H
 import Data.Maybe (catMaybes)
@@ -26,7 +25,7 @@ import qualified Data.Scientific as Scientific
 import qualified Data.String.Utils as S
 import Data.Text (Text)
 import qualified Data.Text as T
-import Debug.Trace
+import qualified Debug.Trace as D
 import Eval
 import GHC.Generics (Generic)
 import Lens.Micro
@@ -77,10 +76,10 @@ makeSem ''Eval
 
 updateState :: Member (State UpdateState) r => [Message] -> Sem r ()
 updateState [] = return ()
-updateState messages = put $ UpdateState . (+ 1) $ maximum $ messages <&> _updateId
+updateState messages = put $ D.traceShowId $ UpdateState . (+ 1) $ maximum $ messages <&> _updateId
 
 reqToIO :: forall a r. Member (Embed IO) r => Req a -> Sem r a
-reqToIO req = embed @IO $ runReq defaultHttpConfig {httpConfigRetryPolicy = constantDelay 50000 <> limitRetries 233} req
+reqToIO req = embed @IO $ runReq defaultHttpConfig req
 
 tgBotToIO :: Member (Embed IO) r => Sem (TgBot ': r) a -> Sem r a
 tgBotToIO = interpret $ \case
@@ -131,19 +130,21 @@ program = do
 runApplication :: IO ()
 runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . evalToIO . tgBotToIO . evalState (UpdateState 233) $ program
 
+-- Discard result.
 logResult :: Member TgBot r => Sem r Bool -> Sem r ()
 logResult r = r >> return ()
 
 messageHandler :: Members '[TgBot, Eval] r => Message -> Sem r ()
 messageHandler Message {..} = do
-  let z = M.parse (M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
-  case (traceShow z z) of
+  let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
+  case (D.traceShowId z) of
     Left e ->
       if _isPM
         then logResult $ reply (_chatId, T.pack . M.errorBundlePretty $ e, _messageId)
         else return ()
     Right (cmd, arg) -> case cmd of
       "help" -> logResult $ reply (_chatId, T.pack helpMessage, _messageId)
+      "start" -> logResult $ reply (_chatId, "Hi!", _messageId)
       "eval" -> do
         result <- callEval arg
         let r = if result == [] then "Empty Body QAQ" else result
@@ -152,4 +153,3 @@ messageHandler Message {..} = do
         result <- callLambda cmd arg
         let r = if result == [] then "Empty Body QAQ" else result
         logResult $ reply (_chatId, T.pack . replace' $ r, _messageId)
-  return ()
