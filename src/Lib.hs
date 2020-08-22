@@ -66,6 +66,7 @@ newtype UpdateState = UpdateState Integer deriving (Eq, Show)
 data TgBot m a where
   Poll :: UpdateState -> TgBot m [Message]
   Reply :: (ChatID, Text, ReplyId) -> TgBot m Bool
+  SendChatAction :: ChatID -> TgBot m Bool
 
 data Eval m a where
   CallLambda :: Cmd -> Expr -> Eval m String
@@ -113,6 +114,12 @@ tgBotToIO = interpret $ \case
         request = req POST sendMessageAPI (ReqBodyJson obj) jsonResponse mempty
     response <- reqToIO request
     return $ response & ok . responseBody
+  SendChatAction (chatId) -> do
+    let obj = object ["chat_id" .= chatId, "action" .= String "typing"]
+        request :: Req (JsonResponse (MyResponse Value))
+        request = req POST sendChatActionAPI (ReqBodyJson obj) jsonResponse mempty
+    response <- reqToIO request
+    return $ response & ok . responseBody
 
 evalToIO :: Member (Embed IO) r => Sem (Eval ': r) a -> Sem r a
 evalToIO = interpret $ \case
@@ -134,9 +141,10 @@ runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . evalToIO . tgBot
 logResult :: Member TgBot r => Sem r Bool -> Sem r ()
 logResult r = r >> return ()
 
-messageHandler :: Members '[TgBot, Eval] r => Message -> Sem r ()
+messageHandler :: Members '[TgBot, Eval, Async] r => Message -> Sem r ()
 messageHandler Message {..} = do
   let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
+  async $ sendChatAction _chatId
   case (D.traceShowId z) of
     Left e ->
       if _isPM
