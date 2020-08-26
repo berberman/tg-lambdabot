@@ -144,20 +144,21 @@ logResult r = r >> return ()
 messageHandler :: Members '[TgBot, Eval, Async] r => Message -> Sem r ()
 messageHandler Message {..} = do
   let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
-  async $ sendChatAction _chatId
   case (D.traceShowId z) of
     Left e ->
       if _isPM
         then logResult $ reply (_chatId, T.pack . M.errorBundlePretty $ e, _messageId)
         else return ()
-    Right (cmd, arg) -> case cmd of
-      "help" -> logResult $ reply (_chatId, T.pack helpMessage, _messageId)
-      "start" -> logResult $ reply (_chatId, "Hi!", _messageId)
-      "eval" -> do
-        result <- callEval arg
-        let r = if result == [] then "Empty Body QAQ" else result
-        logResult $ reply (_chatId, T.pack . replace' $ r, _messageId)
-      _ -> do
-        result <- callLambda cmd arg
-        let r = if result == [] then "Empty Body QAQ" else result
-        logResult $ reply (_chatId, T.pack . replace' $ r, _messageId)
+    Right (cmd, arg) ->
+      async (sendChatAction _chatId)
+        >> case cmd of
+          "help" -> logResult $ reply (_chatId, T.pack helpMessage, _messageId)
+          "start" -> logResult $ reply (_chatId, "Hi!", _messageId)
+          "eval" -> do
+            result <- callEval arg
+            let r = if result == [] then "Empty Body QAQ" else result
+            logResult $ reply (_chatId, T.pack . replace' $ r, _messageId)
+          _ -> do
+            result <- callLambda cmd arg
+            let r = if result == [] then "Empty Body QAQ" else result
+            logResult $ reply (_chatId, T.pack . replace' $ r, _messageId)
