@@ -2,8 +2,6 @@
 
 module Commands where
 
-import Data.Text (Text)
-import qualified Data.Text as T
 import Data.Void
 import Lens.Micro
 import Text.Megaparsec
@@ -82,7 +80,7 @@ parseStart = parseRaw "/start"
 parseCmd :: Parser (String, String)
 parseCmd = do
   ('/' : cmd) <- choice $ allCommands <&> try . string . ('/' :) . _cmd
-  space <- (try $ char (' ') *> return ()) <|> eof
+  _ <- (try $ char (' ') *> return ()) <|> eof
   rest <- manyTill anySingle eof
   return (cmd, rest)
 

@@ -1,65 +1,39 @@
-cabal-version: 1.12
+cabal-version:      2.4
+name:               tg-lambdabot
+version:            0.1.0.0
+synopsis:           Lambdabot for telegram.
+description:
+  Please see the README on GitHub at <https://github.com/berberman/tg-lambdabot#readme>
 
--- This file has been generated from package.yaml by hpack version 0.34.2.
---
--- see: https://github.com/sol/hpack
-
-name:           tg-lambdabot
-version:        0.1.0.0
-synopsis:       Lambdabot for telegram.
-description:    Please see the README on GitHub at <https://github.com/berberman/tg-lambdabot#readme>
-category:       Web
-homepage:       https://github.com/berberman/tg-lambdabot#readme
-bug-reports:    https://github.com/berberman/tg-lambdabot/issues
-author:         berberman
-maintainer:     berberman
-copyright:      2020 berberman
-license:        BSD3
-license-file:   LICENSE
-build-type:     Simple
-extra-source-files:
-    README.md
+category:           Web
+homepage:           https://github.com/berberman/tg-lambdabot#readme
+bug-reports:        https://github.com/berberman/tg-lambdabot/issues
+author:             berberman
+maintainer:         berberman
+copyright:          2020 berberman
+license:            BSD-3-Clause
+license-file:       LICENSE
+build-type:         Simple
+extra-source-files: README.md
+tested-with:        GHC ==8.10.2
 
 source-repository head
-  type: git
+  type:     git
   location: https://github.com/berberman/tg-lambdabot
 
-library
-  exposed-modules:
-      API
-      Commands
-      Eval
-      Lib
+executable tg-lambdabot
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  ghc-options:      -threaded -rtsopts -with-rtsopts=-N
   other-modules:
-      Paths_tg_lambdabot
-  hs-source-dirs:
-      src
-  ghc-options: -O2 -flate-specialise -fspecialise-aggressively
-  build-depends:
-      MissingH
-    , aeson
-    , base >=4.7 && <5
-    , megaparsec
-    , microlens
-    , polysemy
-    , process
-    , req
-    , scientific
-    , text
-    , unordered-containers
-  default-language: Haskell2010
+    API
+    Commands
+    Eval
+    Lib
 
-executable tg-lambdabot-exe
-  main-is: Main.hs
-  other-modules:
-      Paths_tg_lambdabot
-  hs-source-dirs:
-      app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      MissingH
     , aeson
-    , base >=4.7 && <5
+    , base
     , megaparsec
     , microlens
     , polysemy
@@ -67,6 +41,6 @@ executable tg-lambdabot-exe
     , req
     , scientific
     , text
-    , tg-lambdabot
     , unordered-containers
+
   default-language: Haskell2010

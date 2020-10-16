@@ -22,7 +22,6 @@ import Data.Aeson
 import qualified Data.HashMap.Strict as H
 import Data.Maybe (catMaybes)
 import qualified Data.Scientific as Scientific
-import qualified Data.String.Utils as S
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Debug.Trace as D
@@ -32,7 +31,6 @@ import Lens.Micro
 import Network.HTTP.Req
 import Polysemy
 import Polysemy.Async
-import Polysemy.Internal (send)
 import Polysemy.State
 import qualified Text.Megaparsec as M
 
@@ -123,8 +121,10 @@ tgBotToIO = interpret $ \case
 
 evalToIO :: Member (Embed IO) r => Sem (Eval ': r) a -> Sem r a
 evalToIO = interpret $ \case
-  CallLambda cmd expr -> embed . runCommand $ '@' : (S.replace "_" "-" cmd) ++ " " ++ expr
+  CallLambda cmd expr -> embed . runCommand $ "@" <> replace cmd <> " " <> expr
   CallEval expr -> embed $ runEval expr
+  where
+    replace = T.unpack . T.replace "_" "-" . T.pack
 
 program :: Members '[TgBot, State UpdateState, Async, Eval] r => Sem r ()
 program = do
@@ -155,7 +155,7 @@ messageHandler Message {..} = do
           "help" -> logResult $ reply (_chatId, T.pack helpMessage, _messageId)
           "start" -> logResult $ reply (_chatId, "Hi!", _messageId)
           "eval" -> do
-            result <- callEval arg
+            result <- callEval $ arg
             let r = if result == [] then "Empty Body QAQ" else result
             logResult $ reply (_chatId, T.pack . replace' $ r, _messageId)
           _ -> do
