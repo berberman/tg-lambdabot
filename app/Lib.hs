@@ -101,21 +101,24 @@ updateState messages = log (T.pack $ show new) >> put new
 reqToIO :: forall a r. Member (Embed IO) r => Req a -> Sem r a
 reqToIO req = embed @IO $ runReq defaultHttpConfig req
 
-tgBotToIO :: Member (Embed IO) r => Sem (TgBot ': r) a -> Sem r a
+tgBotToIO :: Members [Logger, Embed IO] r => Sem (TgBot ': r) a -> Sem r a
 tgBotToIO = interpret $ \case
   Poll (UpdateState state) -> do
     let request = req POST getUpdatesAPI (ReqBodyJson $ object ["offset" .= state, "allowed_updates" .= Array ["message"]]) jsonResponse mempty
     response <- reqToIO request
     return . parseMessages $ responseBody response
     where
-      messageParser (Object v) =
-        Message
-          <$> v .: "update_id"
-          <*> v .: "message_id"
-          <*> v .: "id"
-          <*> ((\(x :: Text) -> x == "private") <$> v .: "type")
-          <*> (fromMaybe "" <$> v .:? "text")
-          <*> v .: "from"
+      messageParser (Object v) = do
+        _updateId <- v .: "update_id"
+        msg <- v .: "message"
+        _messageId <- msg .: "message_id"
+        _sender <- msg .: "from"
+        chat <- v .: "chat"
+        _chatId <- chat .: "chat_id"
+        chatType :: Text <- chat .: "type"
+        _text <- msg .: "text"
+        let _isPM = chatType == "private"
+        return Message {..}
       parseMessages :: MyResponse [Value] -> [Message]
       parseMessages (MyResponse _ a) = catMaybes $ a <&> parseMaybe messageParser
   Reply (chatId, text, replyId) -> do
@@ -154,7 +157,7 @@ program = do
   program
 
 runApplication :: IO ()
-runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . evalToIO . tgBotToIO . loggerToIO . evalState (UpdateState 233) $ program
+runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . loggerToIO . evalToIO . tgBotToIO . evalState (UpdateState 233) $ program
 
 messageHandler :: Members '[TgBot, Eval, Async, Logger] r => Message -> Sem r ()
 messageHandler Message {..} = do
