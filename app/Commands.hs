@@ -2,6 +2,7 @@
 
 module Commands where
 
+import Data.Functor (($>))
 import Data.Void
 import Lens.Micro
 import Text.Megaparsec
@@ -66,7 +67,7 @@ lambdaModules =
 
 allCommands = (lambdaModules <&> _cmdList) ^. each
 
-helpMessage = unlines $ allCommands & mapped %~ (\c -> ((<> ": ") . ("/" <>) $ (c & _cmd)) <> "   " <> (c & _help))
+helpMessage = unlines $ allCommands <&> (\c -> ((<> ": ") . ("/" <>) $ (c & _cmd)) <> "   " <> (c & _help))
 
 parseRaw :: String -> Parser (String, String)
 parseRaw s = do
@@ -80,7 +81,7 @@ parseStart = parseRaw "/start"
 parseCmd :: Parser (String, String)
 parseCmd = do
   ('/' : cmd) <- choice $ allCommands <&> try . string . ('/' :) . _cmd
-  _ <- (try $ char (' ') *> return ()) <|> eof
+  _ <- try (char ' ' $> ()) <|> eof
   rest <- manyTill anySingle eof
   return (cmd, rest)
 

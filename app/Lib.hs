@@ -18,13 +18,14 @@ module Lib where
 
 import API
 import Commands
+import Control.Monad (void, when)
 import Data.Aeson
-import qualified Data.HashMap.Strict as H
-import Data.Maybe (catMaybes)
-import qualified Data.Scientific as Scientific
+import Data.Aeson.Types (parseMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Debug.Trace as D
+import qualified Data.Text.IO as T
+import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Eval
 import GHC.Generics (Generic)
 import Lens.Micro
@@ -33,15 +34,29 @@ import Polysemy
 import Polysemy.Async
 import Polysemy.State
 import qualified Text.Megaparsec as M
+import Prelude hiding (log)
 
 data Message = Message
   { _updateId :: Integer,
     _messageId :: Integer,
     _chatId :: Integer,
     _isPM :: Bool,
-    _text :: Text
+    _text :: Text,
+    _sender :: User
   }
   deriving (Show, Eq)
+
+data User = User
+  { first_name :: Text,
+    last_name :: Maybe Text,
+    username :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON User
+
+prettyShowUser :: User -> Text
+prettyShowUser User {..} = first_name <> fromMaybe " " last_name <> maybe "" (\u -> "(@" <> u <> ")") username
 
 data MyResponse a = MyResponse
   { ok :: Bool,
@@ -70,12 +85,18 @@ data Eval m a where
   CallLambda :: Cmd -> Expr -> Eval m String
   CallEval :: Expr -> Eval m String
 
+data Logger m a where
+  Log :: Text -> Logger m ()
+
 makeSem ''TgBot
 makeSem ''Eval
+makeSem ''Logger
 
-updateState :: Member (State UpdateState) r => [Message] -> Sem r ()
+updateState :: Members [State UpdateState, Logger] r => [Message] -> Sem r ()
 updateState [] = return ()
-updateState messages = put $ D.traceShowId $ UpdateState . (+ 1) $ maximum $ messages <&> _updateId
+updateState messages = log (T.pack $ show new) >> put new
+  where
+    new = UpdateState . (+ 1) $ maximum $ messages <&> _updateId
 
 reqToIO :: forall a r. Member (Embed IO) r => Req a -> Sem r a
 reqToIO req = embed @IO $ runReq defaultHttpConfig req
@@ -87,32 +108,23 @@ tgBotToIO = interpret $ \case
     response <- reqToIO request
     return . parseMessages $ responseBody response
     where
+      messageParser (Object v) =
+        Message
+          <$> v .: "update_id"
+          <*> v .: "message_id"
+          <*> v .: "id"
+          <*> ((\(x :: Text) -> x == "private") <$> v .: "type")
+          <*> (fromMaybe "" <$> v .:? "text")
+          <*> v .: "from"
       parseMessages :: MyResponse [Value] -> [Message]
-      parseMessages (MyResponse _ a) = catMaybes $ a <&> parseSingle
-        where
-          lookupInt k obj = do
-            m <- H.lookup k obj
-            case m of
-              (Number s) -> case Scientific.floatingOrInteger s of
-                (Right x) -> return x
-                _ -> Nothing
-              _ -> Nothing
-          parseSingle (Object update) = do
-            (Object message) <- H.lookup "message" update
-            (Object chat) <- H.lookup "chat" message
-            updateId <- lookupInt "update_id" update
-            messageId <- lookupInt "message_id" message
-            chatId <- lookupInt "id" chat
-            chatType <- H.lookup "type" chat
-            let (String text) = H.lookupDefault "" "text" message
-            return $ Message updateId messageId chatId (chatType == "private") text
+      parseMessages (MyResponse _ a) = catMaybes $ a <&> parseMaybe messageParser
   Reply (chatId, text, replyId) -> do
     let obj = object ["chat_id" .= chatId, "text" .= text, "reply_to_message_id" .= replyId]
         request :: Req (JsonResponse (MyResponse Value))
         request = req POST sendMessageAPI (ReqBodyJson obj) jsonResponse mempty
     response <- reqToIO request
     return $ response & ok . responseBody
-  SendChatAction (chatId) -> do
+  SendChatAction chatId -> do
     let obj = object ["chat_id" .= chatId, "action" .= String "typing"]
         request :: Req (JsonResponse (MyResponse Value))
         request = req POST sendChatActionAPI (ReqBodyJson obj) jsonResponse mempty
@@ -126,39 +138,44 @@ evalToIO = interpret $ \case
   where
     replace = T.unpack . T.replace "_" "-" . T.pack
 
-program :: Members '[TgBot, State UpdateState, Async, Eval] r => Sem r ()
+loggerToIO :: Member (Embed IO) r => Sem (Logger ': r) a -> Sem r a
+loggerToIO = interpret $ \(Log s) -> embed $ do
+  now <- getCurrentTime
+  T.putStrLn $
+    T.unwords
+      [T.pack $ formatTime defaultTimeLocale "%c" now, s]
+
+program :: Members '[TgBot, State UpdateState, Logger, Async, Eval] r => Sem r ()
 program = do
   state <- get
   messages <- poll state
   updateState messages
-  sequenceConcurrently $ (filter ((/= T.empty) . _text) messages) <&> messageHandler
+  sequenceConcurrently $ filter (not . T.null . _text) messages <&> messageHandler
   program
 
 runApplication :: IO ()
-runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . evalToIO . tgBotToIO . evalState (UpdateState 233) $ program
+runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . evalToIO . tgBotToIO . loggerToIO . evalState (UpdateState 233) $ program
 
--- Discard result.
-logResult :: Member TgBot r => Sem r Bool -> Sem r ()
-logResult r = r >> return ()
-
-messageHandler :: Members '[TgBot, Eval, Async] r => Message -> Sem r ()
+messageHandler :: Members '[TgBot, Eval, Async, Logger] r => Message -> Sem r ()
 messageHandler Message {..} = do
   let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
-  case (D.traceShowId z) of
-    Left e ->
-      if _isPM
-        then logResult $ reply (_chatId, T.pack . M.errorBundlePretty $ e, _messageId)
-        else return ()
-    Right (cmd, arg) ->
+  log $ "[Message] " <> prettyShowUser _sender <> ": " <> _text
+  case z of
+    Left e -> do
+      log "[Info] No parse"
+      when _isPM $
+        void $ reply (_chatId, T.pack . M.errorBundlePretty $ e, _messageId)
+    Right (cmd, arg) -> do
+      log $ "[Info] /" <> T.pack cmd <> " " <> T.pack arg
       async (sendChatAction _chatId)
-        >> case cmd of
-          "help" -> logResult $ reply (_chatId, T.pack helpMessage, _messageId)
-          "start" -> logResult $ reply (_chatId, "Hi!", _messageId)
-          "eval" -> do
-            result <- callEval $ arg
-            let r = if result == [] then "Empty Body QAQ" else result
-            logResult $ reply (_chatId, T.pack . replace' $ r, _messageId)
-          _ -> do
-            result <- callLambda cmd arg
-            let r = if result == [] then "Empty Body QAQ" else result
-            logResult $ reply (_chatId, T.pack . replace' $ r, _messageId)
+      case cmd of
+        "help" -> void $ reply (_chatId, T.pack helpMessage, _messageId)
+        "start" -> void $ reply (_chatId, "Hi!", _messageId)
+        "eval" -> do
+          result <- callEval arg
+          let r = if null result then "Empty Body QAQ" else result
+          void $ reply (_chatId, T.pack . replace' $ r, _messageId)
+        _ -> do
+          result <- callLambda cmd arg
+          let r = if null result then "Empty Body QAQ" else result
+          void $ reply (_chatId, T.pack . replace' $ r, _messageId)
