@@ -38,11 +38,12 @@ import Prelude hiding (log)
 
 data Message = Message
   { _updateId :: Integer,
-    _messageId :: Integer,
-    _chatId :: Integer,
+    _messageId :: ReplyId,
+    _chatId :: ChatID,
     _isPM :: Bool,
     _text :: Text,
-    _sender :: User
+    _sender :: User,
+    _parent :: Maybe Message
   }
   deriving (Show, Eq)
 
@@ -118,6 +119,8 @@ tgBotToIO = interpret $ \case
         chatType :: Text <- chat .: "type"
         _text <- msg .: "text"
         let _isPM = chatType == "private"
+        _parent' <- msg .:? "reply_to_message"
+        let _parent = _parent' >>= parseMaybe messageParser
         return Message {..}
       parseMessages :: MyResponse [Value] -> [Message]
       parseMessages (MyResponse _ a) = catMaybes $ a <&> parseMaybe messageParser
@@ -159,26 +162,32 @@ program = do
 runApplication :: IO ()
 runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . loggerToIO . evalToIO . tgBotToIO . evalState (UpdateState 233) $ program
 
+messageIdToReply :: Message -> ReplyId
+messageIdToReply Message {..} = case _parent of
+  Just Message {_messageId = i} -> i
+  _ -> _messageId
+
 messageHandler :: Members '[TgBot, Eval, Async, Logger] r => Message -> Sem r ()
-messageHandler Message {..} = do
+messageHandler m@Message {..} = do
   let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
+      replyF text = void $ reply (_chatId, text, messageIdToReply m)
   log $ "[Message] " <> prettyShowUser _sender <> ": " <> _text
   case z of
     Left e -> do
       log "[Info] No parse"
       when _isPM $
-        void $ reply (_chatId, T.pack . M.errorBundlePretty $ e, _messageId)
+        replyF $ T.pack . M.errorBundlePretty $ e
     Right (cmd, arg) -> do
       log $ "[Info] /" <> T.pack cmd <> " " <> T.pack arg
       async (sendChatAction _chatId)
       case cmd of
-        "help" -> void $ reply (_chatId, T.pack helpMessage, _messageId)
-        "start" -> void $ reply (_chatId, "Hi!", _messageId)
+        "help" -> replyF $ T.pack helpMessage
+        "start" -> replyF "Hi!"
         "eval" -> do
           result <- callEval arg
           let r = if null result then "Empty Body QAQ" else result
-          void $ reply (_chatId, T.pack . replace' $ r, _messageId)
+          replyF $ T.pack r
         _ -> do
           result <- callLambda cmd arg
           let r = if null result then "Empty Body QAQ" else result
-          void $ reply (_chatId, T.pack . replace' $ r, _messageId)
+          replyF . T.pack . replace' $ r
