@@ -12,9 +12,7 @@ buildCommand x = proc "lambdabot" ["-e " <> x]
 runShell :: CreateProcess -> IO String
 runShell s = do
   (exit, out, err) <- readCreateProcessWithExitCode s ""
-  case exit of
-    (ExitFailure _) -> return err
-    _ -> return out
+  return out
 
 runEval :: String -> IO String
 runEval = runShell . buildEval

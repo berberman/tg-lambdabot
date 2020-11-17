@@ -185,9 +185,9 @@ messageHandler m@Message {..} = do
         "start" -> replyF "Hi!"
         "eval" -> do
           result <- callEval arg
-          let r = if null result then "Empty Body QAQ" else result
+          let r = if null result then "QAQ" else result
           replyF $ T.pack r
         _ -> do
           result <- callLambda cmd arg
-          let r = if null result then "Empty Body QAQ" else result
+          let r = if null result then "QAQ" else result
           replyF . T.pack . replace' $ r
