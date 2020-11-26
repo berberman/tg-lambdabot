@@ -11,3 +11,5 @@ getUpdatesAPI = baseAPI /: "getUpdates"
 sendMessageAPI = baseAPI /: "sendMessage"
 
 sendChatActionAPI = baseAPI /: "sendChatAction"
+
+answerInlineQueryAPI = baseAPI /: "answerInlineQuery"

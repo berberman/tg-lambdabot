@@ -43,9 +43,19 @@ data Message = Message
     _isPM :: Bool,
     _text :: Text,
     _sender :: User,
-    _parent :: Maybe Message
+    _parentMsgId :: Maybe ReplyId,
+    _inlineQuery :: Maybe InlineQuery
   }
   deriving (Show, Eq)
+
+data InlineQuery = InlineQuery
+  { _inline_id :: InlineId,
+    _inline_text :: Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON InlineQuery where
+  parseJSON = withObject "InlineQuery" $ \v -> InlineQuery <$> v .: "id" <*> v .: "query"
 
 data User = User
   { first_name :: Text,
@@ -75,11 +85,14 @@ type Expr = String
 
 type Cmd = String
 
+type InlineId = String
+
 newtype UpdateState = UpdateState Integer deriving (Eq, Show)
 
 data TgBot m a where
   Poll :: UpdateState -> TgBot m [Message]
   Reply :: (ChatID, Text, ReplyId) -> TgBot m Bool
+  AnswerInlineQuery :: (Text, InlineId) -> TgBot m Bool
   SendChatAction :: ChatID -> TgBot m Bool
 
 data Eval m a where
@@ -105,7 +118,7 @@ reqToIO req = embed @IO $ runReq defaultHttpConfig req
 tgBotToIO :: Members [Logger, Embed IO] r => Sem (TgBot ': r) a -> Sem r a
 tgBotToIO = interpret $ \case
   Poll (UpdateState state) -> do
-    let request = req POST getUpdatesAPI (ReqBodyJson $ object ["offset" .= state, "allowed_updates" .= Array ["message"]]) jsonResponse mempty
+    let request = req POST getUpdatesAPI (ReqBodyJson $ object ["offset" .= state, "allowed_updates" .= Array ["message", "inline_query"]]) jsonResponse mempty
     response <- reqToIO request
     return . parseMessages $ responseBody response
     where
@@ -119,8 +132,11 @@ tgBotToIO = interpret $ \case
         chatType :: Text <- chat .: "type"
         _text <- msg .: "text"
         let _isPM = chatType == "private"
-        _parent' <- msg .:? "reply_to_message"
-        let _parent = _parent' >>= parseMaybe messageParser
+        parentMsg :: Maybe Object <- msg .:? "reply_to_message"
+        _parentMsgId <- case parentMsg of
+          Just p -> p .: "message_id"
+          _ -> return Nothing
+        _inlineQuery <- v .:? "inline_query"
         return Message {..}
       parseMessages :: MyResponse [Value] -> [Message]
       parseMessages (MyResponse _ a) = catMaybes $ a <&> parseMaybe messageParser
@@ -128,6 +144,14 @@ tgBotToIO = interpret $ \case
     let obj = object ["chat_id" .= chatId, "text" .= text, "reply_to_message_id" .= replyId]
         request :: Req (JsonResponse (MyResponse Value))
         request = req POST sendMessageAPI (ReqBodyJson obj) jsonResponse mempty
+    response <- reqToIO request
+    return $ response & ok . responseBody
+  AnswerInlineQuery (text, queryId) -> do
+    let obj = object ["inline_query_id" .= queryId, "results" .= Array [result]]
+        result = object ["type" .= String "article", "id" .= (queryId <> "r"), "title" .= String "Point free", "input_message_content" .= content]
+        content = object ["message_text" .= text, "parse_mode" .= String "MarkdownV2"]
+        request :: Req (JsonResponse (MyResponse Value))
+        request = req POST answerInlineQueryAPI (ReqBodyJson obj) jsonResponse mempty
     response <- reqToIO request
     return $ response & ok . responseBody
   SendChatAction chatId -> do
@@ -163,9 +187,7 @@ runApplication :: IO ()
 runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . loggerToIO . evalToIO . tgBotToIO . evalState (UpdateState 233) $ program
 
 messageIdToReply :: Message -> ReplyId
-messageIdToReply Message {..} = case _parent of
-  Just Message {_messageId = i} -> i
-  _ -> _messageId
+messageIdToReply Message {..} = fromMaybe _messageId _parentMsgId
 
 messageHandler :: Members '[TgBot, Eval, Async, Logger] r => Message -> Sem r ()
 messageHandler m@Message {..} = do
