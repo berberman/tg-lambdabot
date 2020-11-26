@@ -13,11 +13,13 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Lib where
 
 import API
 import Commands
+import Control.Applicative ((<|>))
 import Control.Monad (void, when)
 import Data.Aeson
 import Data.Aeson.Types (parseMaybe)
@@ -36,16 +38,20 @@ import Polysemy.State
 import qualified Text.Megaparsec as M
 import Prelude hiding (log)
 
-data Message = Message
-  { _updateId :: Integer,
-    _messageId :: ReplyId,
-    _chatId :: ChatID,
-    _isPM :: Bool,
-    _text :: Text,
-    _sender :: User,
-    _parentMsgId :: Maybe ReplyId,
-    _inlineQuery :: Maybe InlineQuery
-  }
+data Message
+  = TextMessage
+      { _updateId :: Integer,
+        _messageId :: ReplyId,
+        _chatId :: ChatID,
+        _isPM :: Bool,
+        _text :: Text,
+        _sender :: User,
+        _parentMsgId :: Maybe ReplyId
+      }
+  | InlineMessage
+      { _updateId :: Integer,
+        _inlineQuery :: InlineQuery
+      }
   deriving (Show, Eq)
 
 data InlineQuery = InlineQuery
@@ -91,8 +97,8 @@ newtype UpdateState = UpdateState Integer deriving (Eq, Show)
 
 data TgBot m a where
   Poll :: UpdateState -> TgBot m [Message]
-  Reply :: (ChatID, Text, ReplyId) -> TgBot m Bool
-  AnswerInlineQuery :: (Text, InlineId) -> TgBot m Bool
+  Reply :: ChatID -> Text -> ReplyId -> TgBot m Bool
+  AnswerInlineQuery :: Text -> Text -> InlineId -> TgBot m Bool
   SendChatAction :: ChatID -> TgBot m Bool
 
 data Eval m a where
@@ -122,7 +128,12 @@ tgBotToIO = interpret $ \case
     response <- reqToIO request
     return . parseMessages $ responseBody response
     where
-      messageParser (Object v) = do
+      messageParser = withObject "Message" $ \v -> parseInline v <|> parseText v
+      parseInline v = do
+        _updateId <- v .: "update_id"
+        _inlineQuery <- v .: "inline_query"
+        return InlineMessage {..}
+      parseText v = do
         _updateId <- v .: "update_id"
         msg <- v .: "message"
         _messageId <- msg .: "message_id"
@@ -136,19 +147,18 @@ tgBotToIO = interpret $ \case
         _parentMsgId <- case parentMsg of
           Just p -> p .: "message_id"
           _ -> return Nothing
-        _inlineQuery <- v .:? "inline_query"
-        return Message {..}
+        return TextMessage {..}
       parseMessages :: MyResponse [Value] -> [Message]
       parseMessages (MyResponse _ a) = catMaybes $ a <&> parseMaybe messageParser
-  Reply (chatId, text, replyId) -> do
+  (Reply chatId text replyId) -> do
     let obj = object ["chat_id" .= chatId, "text" .= text, "parse_mode" .= String "MarkdownV2", "reply_to_message_id" .= replyId]
         request :: Req (JsonResponse (MyResponse Value))
         request = req POST sendMessageAPI (ReqBodyJson obj) jsonResponse mempty
     response <- reqToIO request
     return $ response & ok . responseBody
-  AnswerInlineQuery (text, queryId) -> do
+  (AnswerInlineQuery title text queryId) -> do
     let obj = object ["inline_query_id" .= queryId, "results" .= Array [result]]
-        result = object ["type" .= String "article", "id" .= (queryId <> "r"), "title" .= String "Point free", "input_message_content" .= content]
+        result = object ["type" .= String "article", "id" .= (queryId <> "r"), "title" .= title, "input_message_content" .= content]
         content = object ["message_text" .= text, "parse_mode" .= String "MarkdownV2"]
         request :: Req (JsonResponse (MyResponse Value))
         request = req POST answerInlineQueryAPI (ReqBodyJson obj) jsonResponse mempty
@@ -180,14 +190,15 @@ program = do
   state <- get
   messages <- poll state
   updateState messages
-  sequenceConcurrently $ filter (not . T.null . _text) messages <&> messageHandler
+  sequenceConcurrently $ messages <&> messageHandler
   program
 
 runApplication :: IO ()
 runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . loggerToIO . evalToIO . tgBotToIO . evalState (UpdateState 233) $ program
 
 messageIdToReply :: Message -> ReplyId
-messageIdToReply Message {..} = fromMaybe _messageId _parentMsgId
+messageIdToReply TextMessage {..} = fromMaybe _messageId _parentMsgId
+messageIdToReply _ = undefined
 
 wrapMarkdown :: String -> Text
 wrapMarkdown text =
@@ -198,34 +209,33 @@ wrapMarkdown text =
     ]
 
 messageHandler :: Members '[TgBot, Eval, Async, Logger] r => Message -> Sem r ()
-messageHandler m@Message {..}
-  | Just InlineQuery {..} <- _inlineQuery = do
-    result <- callLambda "pl" $ T.unpack _inline_text
-    let text = wrapMarkdown result
-    void $ answerInlineQuery (text, _inline_id)
-  | otherwise = do
-    let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
-        prettySender = prettyShowUser _sender
-        replyF text = do
-          log $ "[Info] Reply " <> prettySender <> " :" <> text
-          void $ reply (_chatId, text, messageIdToReply m)
-    log $ "[Message] " <> prettySender <> ": " <> _text
-    case z of
-      Left e -> do
-        log "[Info] No parse"
-        when _isPM $
-          replyF $ T.pack . M.errorBundlePretty $ e
-      Right (cmd, arg) -> do
-        log $ "[Info] /" <> T.pack cmd <> " " <> T.pack arg
-        async (sendChatAction _chatId)
-        case cmd of
-          "help" -> replyF $ T.pack helpMessage
-          "start" -> replyF "Hi!"
-          "eval" -> do
-            result <- callEval arg
-            let r = if null result then "QAQ" else result
-            replyF $ wrapMarkdown r
-          _ -> do
-            result <- callLambda cmd arg
-            let r = if null result then "QAQ" else result
-            replyF . wrapMarkdown . replace' $ r
+messageHandler InlineMessage {_inlineQuery = InlineQuery {_inline_text = T.unpack -> _inline_text, ..}} = do
+  result <- callLambda "pl" _inline_text
+  let text = T.unlines ["Before:", wrapMarkdown _inline_text, "After:", wrapMarkdown result]
+  void $ answerInlineQuery (T.pack result) text _inline_id
+messageHandler m@TextMessage {..} = do
+  let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
+      prettySender = prettyShowUser _sender
+      replyF text = do
+        log $ "[Info] Reply\n" <> prettySender <> ": " <> text
+        void $ reply _chatId text (messageIdToReply m)
+  log $ "[Message] " <> prettySender <> ": " <> _text
+  case z of
+    Left e -> do
+      log "[Info] No parse"
+      when _isPM $
+        replyF $ wrapMarkdown . M.errorBundlePretty $ e
+    Right (cmd, arg) -> do
+      log $ "[Info] /" <> T.pack cmd <> " " <> T.pack arg
+      async (sendChatAction _chatId)
+      case cmd of
+        "help" -> replyF $ T.pack helpMessage
+        "start" -> replyF $ wrapMarkdown "Hi!"
+        "eval" -> do
+          result <- callEval arg
+          let r = if null result then "QAQ" else result
+          replyF $ wrapMarkdown r
+        _ -> do
+          result <- callLambda cmd arg
+          let r = if null result then "QAQ" else result
+          replyF . wrapMarkdown . replace' $ r
