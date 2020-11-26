@@ -141,7 +141,7 @@ tgBotToIO = interpret $ \case
       parseMessages :: MyResponse [Value] -> [Message]
       parseMessages (MyResponse _ a) = catMaybes $ a <&> parseMaybe messageParser
   Reply (chatId, text, replyId) -> do
-    let obj = object ["chat_id" .= chatId, "text" .= text, "reply_to_message_id" .= replyId]
+    let obj = object ["chat_id" .= chatId, "text" .= text, "parse_mode" .= String "MarkdownV2", "reply_to_message_id" .= replyId]
         request :: Req (JsonResponse (MyResponse Value))
         request = req POST sendMessageAPI (ReqBodyJson obj) jsonResponse mempty
     response <- reqToIO request
@@ -189,27 +189,43 @@ runApplication = runFinal . embedToFinal @IO . asyncToIOFinal . loggerToIO . eva
 messageIdToReply :: Message -> ReplyId
 messageIdToReply Message {..} = fromMaybe _messageId _parentMsgId
 
+wrapMarkdown :: String -> Text
+wrapMarkdown text =
+  T.unlines
+    [ "```haskell",
+      T.pack text,
+      "```"
+    ]
+
 messageHandler :: Members '[TgBot, Eval, Async, Logger] r => Message -> Sem r ()
-messageHandler m@Message {..} = do
-  let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
-      replyF text = void $ reply (_chatId, text, messageIdToReply m)
-  log $ "[Message] " <> prettyShowUser _sender <> ": " <> _text
-  case z of
-    Left e -> do
-      log "[Info] No parse"
-      when _isPM $
-        replyF $ T.pack . M.errorBundlePretty $ e
-    Right (cmd, arg) -> do
-      log $ "[Info] /" <> T.pack cmd <> " " <> T.pack arg
-      async (sendChatAction _chatId)
-      case cmd of
-        "help" -> replyF $ T.pack helpMessage
-        "start" -> replyF "Hi!"
-        "eval" -> do
-          result <- callEval arg
-          let r = if null result then "QAQ" else result
-          replyF $ T.pack r
-        _ -> do
-          result <- callLambda cmd arg
-          let r = if null result then "QAQ" else result
-          replyF . T.pack . replace' $ r
+messageHandler m@Message {..}
+  | Just InlineQuery {..} <- _inlineQuery = do
+    result <- callLambda "pl" $ T.unpack _inline_text
+    let text = wrapMarkdown result
+    void $ answerInlineQuery (text, _inline_id)
+  | otherwise = do
+    let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
+        prettySender = prettyShowUser _sender
+        replyF text = do
+          log $ "[Info] Reply " <> prettySender <> " :" <> text
+          void $ reply (_chatId, text, messageIdToReply m)
+    log $ "[Message] " <> prettySender <> ": " <> _text
+    case z of
+      Left e -> do
+        log "[Info] No parse"
+        when _isPM $
+          replyF $ T.pack . M.errorBundlePretty $ e
+      Right (cmd, arg) -> do
+        log $ "[Info] /" <> T.pack cmd <> " " <> T.pack arg
+        async (sendChatAction _chatId)
+        case cmd of
+          "help" -> replyF $ T.pack helpMessage
+          "start" -> replyF "Hi!"
+          "eval" -> do
+            result <- callEval arg
+            let r = if null result then "QAQ" else result
+            replyF $ wrapMarkdown r
+          _ -> do
+            result <- callLambda cmd arg
+            let r = if null result then "QAQ" else result
+            replyF . wrapMarkdown . replace' $ r
