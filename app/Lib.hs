@@ -211,31 +211,31 @@ wrapMarkdown text =
 messageHandler :: Members '[TgBot, Eval, Async, Logger] r => Message -> Sem r ()
 messageHandler InlineMessage {_inlineQuery = InlineQuery {_inline_text = T.unpack -> _inline_text, ..}} = do
   result <- callLambda "pl" _inline_text
-  let text = T.unlines ["Before:", wrapMarkdown _inline_text, "After:", wrapMarkdown result]
+  let text = T.concat ["Before:", wrapMarkdown _inline_text, "After:", wrapMarkdown result]
   void $ answerInlineQuery (T.pack result) text _inline_id
 messageHandler m@TextMessage {..} = do
   let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
       prettySender = prettyShowUser _sender
       replyF text = do
         log $ "[Info] Reply\n" <> prettySender <> ": " <> text
-        void $ reply _chatId text (messageIdToReply m)
-  log $ "[Message] " <> prettySender <> ": " <> _text
+        void $ reply _chatId (wrapMarkdown text) (messageIdToReply m)
+  log $ "[Message] " <> prettySender <> (if _isPM then "[PM]" else "") <> ": " <> _text
   case z of
     Left e -> do
       log "[Info] No parse"
       when _isPM $
-        replyF $ wrapMarkdown . M.errorBundlePretty $ e
+        replyF $ M.errorBundlePretty $ e
     Right (cmd, arg) -> do
       log $ "[Info] /" <> T.pack cmd <> " " <> T.pack arg
       async (sendChatAction _chatId)
       case cmd of
         "help" -> replyF $ T.pack helpMessage
-        "start" -> replyF $ wrapMarkdown "Hi!"
+        "start" -> replyF "Hi!"
         "eval" -> do
           result <- callEval arg
           let r = if null result then "QAQ" else result
-          replyF $ wrapMarkdown r
+          replyF $ T.pack r
         _ -> do
           result <- callLambda cmd arg
           let r = if null result then "QAQ" else result
-          replyF . wrapMarkdown . replace' $ r
+          replyF . T.pack . replace' $ r
