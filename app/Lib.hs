@@ -224,7 +224,7 @@ messageHandler m@TextMessage {..} = do
     Left e -> do
       log "[Info] No parse"
       when _isPM $
-        replyF $ M.errorBundlePretty $ e
+        replyF $ M.errorBundlePretty e
     Right (cmd, arg) -> do
       log $ "[Info] /" <> T.pack cmd <> " " <> T.pack arg
       async (sendChatAction _chatId)
