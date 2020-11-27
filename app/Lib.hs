@@ -217,7 +217,7 @@ messageHandler m@TextMessage {..} = do
   let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
       prettySender = prettyShowUser _sender
       replyF text = do
-        log $ "[Info] Reply\n" <> prettySender <> ": " <> text
+        log $ "[Info] Reply\n" <> prettySender <> ": " <> (T.pack text)
         void $ reply _chatId (wrapMarkdown text) (messageIdToReply m)
   log $ "[Message] " <> prettySender <> (if _isPM then "[PM]" else "") <> ": " <> _text
   case z of
@@ -229,13 +229,13 @@ messageHandler m@TextMessage {..} = do
       log $ "[Info] /" <> T.pack cmd <> " " <> T.pack arg
       async (sendChatAction _chatId)
       case cmd of
-        "help" -> replyF $ T.pack helpMessage
+        "help" -> replyF helpMessage
         "start" -> replyF "Hi!"
         "eval" -> do
           result <- callEval arg
           let r = if null result then "QAQ" else result
-          replyF $ T.pack r
+          replyF r
         _ -> do
           result <- callLambda cmd arg
           let r = if null result then "QAQ" else result
-          replyF . T.pack . replace' $ r
+          replyF . replace' $ r
