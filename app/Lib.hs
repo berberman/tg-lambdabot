@@ -114,7 +114,7 @@ makeSem ''Logger
 
 updateState :: Members [State UpdateState, Logger] r => [Message] -> Sem r ()
 updateState [] = return ()
-updateState messages = log (T.pack $ show new) >> put new
+updateState messages = log ("[Info] " <> T.pack (show new)) >> put new
   where
     new = UpdateState . (+ 1) $ maximum $ messages <&> _updateId
 
@@ -217,7 +217,7 @@ messageHandler m@TextMessage {..} = do
   let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
       prettySender = prettyShowUser _sender
       replyF text = do
-        log $ "[Info] Reply\n" <> prettySender <> ": " <> (T.pack text)
+        log $ "[Info] Reply" <> prettySender <> ":\n" <> T.pack text
         void $ reply _chatId (wrapMarkdown text) (messageIdToReply m)
   log $ "[Message] " <> prettySender <> (if _isPM then "[PM]" else "") <> ": " <> _text
   case z of
