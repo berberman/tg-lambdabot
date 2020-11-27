@@ -211,7 +211,7 @@ wrapMarkdown text =
 messageHandler :: Members '[TgBot, Eval, Async, Logger] r => Message -> Sem r ()
 messageHandler InlineMessage {_inlineQuery = InlineQuery {_inline_text = T.unpack -> _inline_text, ..}} = do
   result <- callLambda "pl" _inline_text
-  let text = T.concat ["Before:", wrapMarkdown _inline_text, "After:", wrapMarkdown result]
+  let text = T.concat ["Before:\n", wrapMarkdown _inline_text, "After:\n", wrapMarkdown result]
   void $ answerInlineQuery (T.pack result) text _inline_id
 messageHandler m@TextMessage {..} = do
   let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
