@@ -14,6 +14,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# OPTIONS_GHC -Wall #-}
 
 module Lib where
 
@@ -43,7 +44,7 @@ data Message
       { _updateId :: Integer,
         _messageId :: ReplyId,
         _chatId :: ChatID,
-        _isPM :: Bool,
+        _title :: Maybe Text,
         _text :: Text,
         _sender :: User,
         _parentMsgId :: Maybe ReplyId
@@ -119,7 +120,7 @@ updateState messages = log ("[Info] " <> T.pack (show new)) >> put new
     new = UpdateState . (+ 1) $ maximum $ messages <&> _updateId
 
 reqToIO :: forall a r. Member (Embed IO) r => Req a -> Sem r a
-reqToIO req = embed @IO $ runReq defaultHttpConfig req
+reqToIO = embed @IO . runReq defaultHttpConfig
 
 tgBotToIO :: Members [Logger, Embed IO] r => Sem (TgBot ': r) a -> Sem r a
 tgBotToIO = interpret $ \case
@@ -140,9 +141,8 @@ tgBotToIO = interpret $ \case
         _sender <- msg .: "from"
         chat <- msg .: "chat"
         _chatId <- chat .: "id"
-        chatType :: Text <- chat .: "type"
-        _text <- msg .: "text"
-        let _isPM = chatType == "private"
+        _title <- chat .:? "title"
+        _text <- T.replace "@potatoGl_bot" "" <$> msg .: "text"
         parentMsg :: Maybe Object <- msg .:? "reply_to_message"
         _parentMsgId <- case parentMsg of
           Just p -> p .: "message_id"
@@ -190,7 +190,7 @@ program = do
   state <- get
   messages <- poll state
   updateState messages
-  sequenceConcurrently $ messages <&> messageHandler
+  void . sequenceConcurrently $ messages <&> messageHandler
   program
 
 runApplication :: IO ()
@@ -208,6 +208,10 @@ wrapMarkdown text =
       "```"
     ]
 
+isPM :: Message -> Bool
+isPM TextMessage {..} = null _title
+isPM _ = undefined
+
 messageHandler :: Members '[TgBot, Eval, Async, Logger] r => Message -> Sem r ()
 messageHandler InlineMessage {_inlineQuery = InlineQuery {_inline_text = T.unpack -> _inline_text, ..}} = do
   result <- callLambda "pl" _inline_text
@@ -217,17 +221,17 @@ messageHandler m@TextMessage {..} = do
   let z = M.parse (M.try parseStart M.<|> M.try parseHelp M.<|> (parseCmd M.<?> "a legal command")) "Message" (T.unpack _text)
       prettySender = prettyShowUser _sender
       replyF text = do
-        log $ "[Info] Reply" <> prettySender <> ":\n" <> T.pack text
+        log $ "[Info] Reply " <> prettySender <> ":\n" <> T.pack text
         void $ reply _chatId (wrapMarkdown text) (messageIdToReply m)
-  log $ "[Message] " <> prettySender <> (if _isPM then "[PM]" else "") <> ": " <> _text
+  log $ "[Message] " <> prettySender <> " [" <> fromMaybe "PM" _title <> "]: " <> _text
   case z of
     Left e -> do
       log "[Info] No parse"
-      when _isPM $
+      when (isPM m) $
         replyF $ M.errorBundlePretty e
     Right (cmd, arg) -> do
       log $ "[Info] /" <> T.pack cmd <> " " <> T.pack arg
-      async (sendChatAction _chatId)
+      void $ async (sendChatAction _chatId)
       case cmd of
         "help" -> replyF helpMessage
         "start" -> replyF "Hi!"
